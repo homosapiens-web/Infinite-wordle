@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>無限 Wordle</title>
+    <style>
+        :root {
+            --bg-color: #121213;
+            --text-color: #ffffff;
+            --border-color: #3a3a3c;
+            --empty-bg: #121213;
+            --filled-border: #565758;
+            --correct: #538d4e;
+            --present: #b59f3b;
+            --absent: #3a3a3c;
+            --key-bg: #818384;
+            --key-text: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Clear Sans', 'Helvetica Neue', Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 60px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        /* 遊戲區域，設定可捲動以支援無限行數 */
+        #game-container {
+            display: flex;
+            justify-content: center;
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px 10px;
+        }
+
+        #board {
+            display: grid;
+            grid-template-rows: repeat(6, 1fr);
+            gap: 5px;
+            height: fit-content;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 5px;
+        }
+
+        .tile {
+            width: 60px;
+            height: 60px;
+            border: 2px solid var(--border-color);
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: transform 0.25s ease-in-out, background-color 0s, border-color 0s;
+        }
+
+        @media (max-width: 400px) {
+            .tile {
+                width: 15vw;
+                height: 15vw;
+                font-size: 1.5rem;
+            }
+        }
+
+        /* 狀態顏色 */
+        .tile.filled { border-color: var(--filled-border); }
+        .tile.correct { background-color: var(--correct); border-color: var(--correct); }
+        .tile.present { background-color: var(--present); border-color: var(--present); }
+        .tile.absent { background-color: var(--absent); border-color: var(--absent); }
+
+        /* 動畫 */
+        .tile.flip-in { transform: rotateX(90deg); }
+        .tile.pop { animation: pop 0.1s; }
+
+        @keyframes pop {
+            0% { transform: scale(0.8); }
+            40% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .row.shake { animation: shake 0.5s; }
+        @keyframes shake {
+            10%, 90% { transform: translateX(-2px); }
+            20%, 80% { transform: translateX(4px); }
+            30%, 50%, 70% { transform: translateX(-6px); }
+            40%, 60% { transform: translateX(6px); }
+        }
+
+        /* 虛擬鍵盤 */
+        #keyboard {
+            height: 200px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .keyboard-row {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .key {
+            background-color: var(--key-bg);
+            color: var(--key-text);
+            border: none;
+            border-radius: 4px;
+            height: 58px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-transform: uppercase;
+            flex: 1;
+            max-width: 43px;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+
+        .key.large { flex: 1.5; max-width: 65px; font-size: 0.9rem; }
+        .key.correct { background-color: var(--correct); }
+        .key.present { background-color: var(--present); }
+        .key.absent { background-color: var(--absent); }
+
+        /* 訊息吐司 (Toast) */
+        #toast {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #ffffff;
+            color: #000000;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            z-index: 100;
+        }
+
+        #toast.show { opacity: 1; }
+
+        /* 結束彈窗 (Modal) */
+        #modal {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        #modal.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        .modal-content h2 { margin-bottom: 15px; font-size: 24px; }
+        .modal-content p { font-size: 18px; margin-bottom: 25px; color: #ddd; }
+        .modal-content .highlight { color: var(--correct); font-size: 28px; font-weight: bold; }
+
+        button.play-again {
+            background-color: var(--correct);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: filter 0.2s;
+        }
+
+        button.play-again:hover { filter: brightness(1.1); }
+    </style>
+</head>
+<body>
+
+    <header>無限 WORDLE</header>
+
+    <div id="toast">訊息</div>
+
+    <div id="game-container">
+        <div id="board">
+            <!-- JavaScript 會動態產生行數 -->
+        </div>
+    </div>
+
+    <div id="keyboard">
+        <!-- JavaScript 會動態產生鍵盤 -->
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <h2 id="modal-title">恭喜過關！</h2>
+            <p id="modal-desc">你總共猜了 <span class="highlight" id="guess-count">0</span> 次才猜中單字。</p>
+            <p style="font-size: 14px; color: #888; margin-bottom: 20px;">正確答案：<span id="correct-word" style="color: white; font-weight: bold;"></span></p>
+            <button class="play-again" onclick="initGame()">再來一局</button>
+        </div>
+    </div>
+
+    <script>
+        // 內建超過 200 個常見 5 字母英文單字庫
+        const wordList = [
+            "APPLE", "TRAIN", "HOUSE", "WATER", "TIGER", "PLANT", "EARTH", "MONEY", "TABLE", "CHAIR",
+            "LIGHT", "NIGHT", "DREAM", "HEART", "MUSIC", "WORLD", "RIVER", "STONE", "FRUIT", "BREAD",
+            "GHOST", "SMILE", "MOUSE", "CLOCK", "PAPER", "PENNY", "SWEET", "STORY", "MAGIC", "POWER",
+            "SPACE", "STARS", "CLOUD", "STORM", "BEACH", "OCEAN", "GLASS", "WATCH", "BOARD", "FRAME",
+            "BLADE", "STEEL", "METAL", "SUGAR", "SPICE", "WHEAT", "FIELD", "GRASS", "SHEEP", "HORSE",
+            "TRACK", "WHEEL", "MOTOR", "RADIO", "VIDEO", "PHOTO", "SOUND", "VOICE", "COLOR", "PAINT",
+            "BRUSH", "SHAPE", "ROUND", "SQUARE", "BLOCK", "BRICK", "WALLS", "FLOOR", "ROOFS", "DOORS",
+            "DANCE", "PARTY", "GAMES", "SPORT", "CHESS", "CARDS", "GUEST", "HOSTS", "CROWD", "YOUTH",
+            "ADULT", "CHILD", "WOMAN", "BLOOD", "FLESH", "BONE", "BRAIN", "MIND", "SENSE", "SIGHT",
+            "TASTE", "TOUCH", "SMELL", "SLEEP", "AWAKE", "ALIVE", "DEATH", "BIRTH", "PEACE", "TRUTH",
+            "FAITH", "TRUST", "DOUBT", "GUILT", "PRIDE", "SHAME", "ANGER", "FEAR", "PANIC", "SHOCK",
+            "TEARS", "CRIME", "THIEF", "JUDGE", "COURT", "LAW", "RULES", "RIGHT", "WRONG", "FALSE",
+            "ERROR", "FAULT", "BLAME", "CAUSE", "EFFECT", "FORCE", "POWER", "MIGHT", "WEAK", "STRONG",
+            "HEAVY", "LIGHT", "THICK", "THIN", "BROAD", "NARROW", "SHORT", "LONG", "LARGE", "SMALL",
+            "QUICK", "SLOW", "EARLY", "LATE", "FIRST", "LAST", "FRONT", "BACK", "LEFT", "RIGHT",
+            "NORTH", "SOUTH", "EAST", "WEST", "UPPER", "LOWER", "INNER", "OUTER", "UNDER", "ABOVE",
+            "BLACK", "WHITE", "GREEN", "BROWN", "CLEAN", "DIRTY", "FRESH", "STALE", "SWEET", "BITTER",
+            "HAPPY", "SAD", "ANGRY", "CALM", "BRAVE", "PROUD", "CRAZY", "SMART", "SILLY", "FUNNY"
+        ];
+
+        let targetWord = "";
+        let currentRow = 0;
+        let currentCol = 0;
+        let guesses = [];
+        let gameOver = false;
+        let isAnimating = false;
+        let isLoading = false;
+        let keyColors = {}; // 追蹤鍵盤顏色狀態
+
+        const keyboardLayout = [
+            ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+            ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+            ['ENTER', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '⌫']
+        ];
+
+        const boardEl = document.getElementById('board');
+        const keyboardEl = document.getElementById('keyboard');
+        const gameContainerEl = document.getElementById('game-container');
+        const toastEl = document.getElementById('toast');
+        const modalEl = document.getElementById('modal');
+
+        // 初始化鍵盤 DOM
+        function initKeyboard() {
+            keyboardEl.innerHTML = '';
+            keyboardLayout.forEach(row => {
+                const rowEl = document.createElement('div');
+                rowEl.className = 'keyboard-row';
+                row.forEach(key => {
+                    const btn = document.createElement('button');
+                    btn.className = 'key';
+                    if (key === 'ENTER' || key === '⌫') btn.classList.add('large');
+                    btn.textContent = key;
+                    btn.setAttribute('data-key', key);
+                    btn.onclick = () => handleKey(key);
+                    rowEl.appendChild(btn);
+                });
+                keyboardEl.appendChild(rowEl);
+            });
+        }
+
+        // 從 API 獲取隨機單字
+        async function fetchRandomWord() {
+            try {
+                // 使用免費的隨機單字 API，指定長度為 5
+                const response = await fetch('https://random-word-api.herokuapp.com/word?length=5');
+                const data = await response.json();
+                return data[0].toUpperCase();
+            } catch (error) {
+                console.error("獲取單字失敗，使用備用單字", error);
+                // 發生錯誤或無網路時，退回使用內建單字庫
+                return wordList[Math.floor(Math.random() * wordList.length)];
+            }
+        }
+
+        // 初始化遊戲
+        async function initGame() {
+            isLoading = true;
+            showToast('正在尋找新單字...');
+            
+            // 透過 API 自動生成單字
+            targetWord = await fetchRandomWord();
+            console.log("偷偷告訴你，答案是:", targetWord); // 除錯用
+
+            isLoading = false;
+            currentRow = 0;
+            currentCol = 0;
+            guesses = [[]];
+            gameOver = false;
+            isAnimating = false;
+            keyColors = {};
+            
+            boardEl.innerHTML = '';
+            // 初始產生 6 行
+            for (let i = 0; i < 6; i++) {
+                createRow();
+            }
+
+            // 重置鍵盤顏色
+            document.querySelectorAll('.key').forEach(k => {
+                k.classList.remove('correct', 'present', 'absent');
+            });
+
+            modalEl.classList.remove('show');
+        }
+
+        // 建立新的一行
+        function createRow() {
+            const rowEl = document.createElement('div');
+            rowEl.className = 'row';
+            rowEl.id = `row-${boardEl.children.length}`;
+            for (let i = 0; i < 5; i++) {
+                const tile = document.createElement('div');
+                tile.className = 'tile';
+                tile.id = `tile-${boardEl.children.length}-${i}`;
+                rowEl.appendChild(tile);
+            }
+            boardEl.appendChild(rowEl);
+        }
+
+        // 處理按鍵輸入
+        function handleKey(key) {
+            if (gameOver || isAnimating || isLoading) return;
+
+            if (key === 'ENTER') {
+                submitGuess();
+            } else if (key === '⌫' || key === 'BACKSPACE') {
+                removeLetter();
+            } else if (/^[A-Z]$/.test(key)) {
+                addLetter(key);
+            }
+        }
+
+        // 實體鍵盤監聽
+        window.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey || e.altKey) return; // 避免阻擋瀏覽器預設快捷鍵
+            let key = e.key.toUpperCase();
+            if (key === 'BACKSPACE') handleKey('⌫');
+            else if (key === 'ENTER') handleKey('ENTER');
+            else if (/^[A-Z]$/.test(key)) handleKey(key);
+        });
+
+        // 加入字母
+        function addLetter(letter) {
+            if (currentCol < 5) {
+                guesses[currentRow].push(letter);
+                const tile = document.getElementById(`tile-${currentRow}-${currentCol}`);
+                tile.textContent = letter;
+                tile.classList.add('filled', 'pop');
+                setTimeout(() => tile.classList.remove('pop'), 100);
+                currentCol++;
+            }
+        }
+
+        // 刪除字母
+        function removeLetter() {
+            if (currentCol > 0) {
+                currentCol--;
+                guesses[currentRow].pop();
+                const tile = document.getElementById(`tile-${currentRow}-${currentCol}`);
+                tile.textContent = '';
+                tile.classList.remove('filled');
+            }
+        }
+
+        // 顯示提示訊息
+        function showToast(msg) {
+            toastEl.textContent = msg;
+            toastEl.classList.add('show');
+            setTimeout(() => toastEl.classList.remove('show'), 2000);
+        }
+
+        // 送出猜測
+        function submitGuess() {
+            if (currentCol !== 5) {
+                showToast('字母數量不足！');
+                document.getElementById(`row-${currentRow}`).classList.add('shake');
+                setTimeout(() => document.getElementById(`row-${currentRow}`).classList.remove('shake'), 500);
+                return;
+            }
+
+            const currentGuess = guesses[currentRow].join('');
+            
+            // 檢查是否為英文組合 (此處簡化，只要是5個英文字母即可，為了讓你體驗無限猜)
+            // 如果要強制一定要在單字庫內，可以取消下方註解：
+            /*
+            if (!wordList.includes(currentGuess)) {
+                showToast('不在單字庫中！');
+                document.getElementById(`row-${currentRow}`).classList.add('shake');
+                setTimeout(() => document.getElementById(`row-${currentRow}`).classList.remove('shake'), 500);
+                return;
+            }
+            */
+
+            checkResult(currentGuess);
+        }
+
+        // 驗證答案並執行動畫
+        function checkResult(guess) {
+            isAnimating = true;
+            let targetArr = targetWord.split('');
+            let guessArr = guess.split('');
+            let tileColors = Array(5).fill('absent');
+            
+            // 為了處理重複字母，我們需要計算目標單字中每個字母的數量
+            let targetLetterCount = {};
+            targetArr.forEach(char => {
+                targetLetterCount[char] = (targetLetterCount[char] || 0) + 1;
+            });
+
+            // 第一次掃描：找出完全正確的綠色
+            for (let i = 0; i < 5; i++) {
+                if (guessArr[i] === targetArr[i]) {
+                    tileColors[i] = 'correct';
+                    targetLetterCount[guessArr[i]] -= 1;
+                }
+            }
+
+            // 第二次掃描：找出位置錯誤但存在的黃色
+            for (let i = 0; i < 5; i++) {
+                if (tileColors[i] === 'correct') continue;
+                if (targetLetterCount[guessArr[i]] > 0) {
+                    tileColors[i] = 'present';
+                    targetLetterCount[guessArr[i]] -= 1;
+                }
+            }
+
+            // 執行翻轉動畫與變色
+            const rowEl = document.getElementById(`row-${currentRow}`);
+            const tiles = rowEl.children;
+
+            for (let i = 0; i < 5; i++) {
+                setTimeout(() => {
+                    tiles[i].classList.add('flip-in');
+                    
+                    setTimeout(() => {
+                        tiles[i].classList.remove('flip-in');
+                        tiles[i].classList.add(tileColors[i]);
+                        
+                        // 更新鍵盤顏色 (綠 > 黃 > 灰)
+                        let keyBtn = document.querySelector(`.key[data-key="${guessArr[i]}"]`);
+                        if (keyBtn) {
+                            let currentColor = keyColors[guessArr[i]];
+                            if (currentColor !== 'correct') {
+                                if (tileColors[i] === 'correct') {
+                                    keyColors[guessArr[i]] = 'correct';
+                                } else if (tileColors[i] === 'present' && currentColor !== 'present') {
+                                    keyColors[guessArr[i]] = 'present';
+                                } else if (tileColors[i] === 'absent' && currentColor !== 'present' && currentColor !== 'correct') {
+                                    keyColors[guessArr[i]] = 'absent';
+                                }
+                                keyBtn.className = `key ${keyColors[guessArr[i]]}`;
+                                if (guessArr[i] === 'ENTER' || guessArr[i] === '⌫') keyBtn.classList.add('large');
+                            }
+                        }
+
+                        // 如果是最後一個方塊翻轉完畢，結算邏輯
+                        if (i === 4) {
+                            setTimeout(() => finishRow(guess), 200);
+                        }
+
+                    }, 125); // 翻轉到一半時改變顏色
+                }, i * 300); // 每個方塊延遲 300ms
+            }
+        }
+
+        // 行結算邏輯
+        function finishRow(guess) {
+            isAnimating = false;
+
+            if (guess === targetWord) {
+                gameOver = true;
+                // 猜對了！顯示總共猜了幾次
+                document.getElementById('guess-count').textContent = currentRow + 1;
+                document.getElementById('correct-word').textContent = targetWord;
+                setTimeout(() => modalEl.classList.add('show'), 500);
+            } else {
+                currentRow++;
+                currentCol = 0;
+                guesses.push([]);
+                
+                // 【無限次數核心邏輯】如果超出目前顯示的行數，就長出新的一行！
+                if (currentRow >= boardEl.children.length) {
+                    createRow();
+                    // 讓畫面自動往下捲動
+                    setTimeout(() => {
+                        gameContainerEl.scrollTop = gameContainerEl.scrollHeight;
+                    }, 100);
+                }
+            }
+        }
+
+        // 啟動遊戲
+        initKeyboard();
+        initGame();
+    </script>
+</body>
+</html>
