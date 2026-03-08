@@ -96,6 +96,9 @@
             .key.large {
                 font-size: 0.75rem !important;
             }
+            .key.backspace {
+                font-size: 1.2rem !important; /* 手機版放大刪除鍵 */
+            }
         }
 
         /* 狀態顏色 */
@@ -162,6 +165,9 @@
         .key.large { 
             flex: 1.5; 
             font-size: 0.85rem; 
+        }
+        .key.backspace {
+            font-size: 1.6rem; /* 電腦版大幅放大刪除鍵圖示 */
         }
         .key.correct { background-color: var(--correct); }
         .key.present { background-color: var(--present); }
@@ -312,6 +318,7 @@
                     const btn = document.createElement('button');
                     btn.className = 'key';
                     if (key === 'ENTER' || key === '⌫') btn.classList.add('large');
+                    if (key === '⌫') btn.classList.add('backspace'); // 加入刪除鍵專屬 class
                     btn.textContent = key;
                     btn.setAttribute('data-key', key);
                     btn.onclick = () => handleKey(key);
@@ -433,7 +440,7 @@
         }
 
         // 送出猜測
-        function submitGuess() {
+        async function submitGuess() {
             if (currentCol !== 5) {
                 showToast('字母數量不足！');
                 document.getElementById(`row-${currentRow}`).classList.add('shake');
@@ -443,16 +450,22 @@
 
             const currentGuess = guesses[currentRow].join('');
             
-            // 檢查是否為英文組合 (此處簡化，只要是5個英文字母即可，為了讓你體驗無限猜)
-            // 如果要強制一定要在單字庫內，可以取消下方註解：
-            /*
-            if (!wordList.includes(currentGuess)) {
-                showToast('不在單字庫中！');
-                document.getElementById(`row-${currentRow}`).classList.add('shake');
-                setTimeout(() => document.getElementById(`row-${currentRow}`).classList.remove('shake'), 500);
-                return;
+            // 檢查是否為真實英文單字 (串接免費字典 API)
+            isLoading = true; // 檢查期間暫停鍵盤輸入
+            try {
+                const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${currentGuess}`);
+                if (!response.ok) {
+                    // 找不到該單字
+                    showToast('查無此字！');
+                    document.getElementById(`row-${currentRow}`).classList.add('shake');
+                    setTimeout(() => document.getElementById(`row-${currentRow}`).classList.remove('shake'), 500);
+                    isLoading = false;
+                    return;
+                }
+            } catch (error) {
+                console.warn("字典 API 連線失敗，跳過驗證放行");
             }
-            */
+            isLoading = false; // 恢復鍵盤輸入
 
             checkResult(currentGuess);
         }
