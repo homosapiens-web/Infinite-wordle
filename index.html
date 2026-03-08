@@ -229,7 +229,19 @@
         .modal-content .highlight { color: var(--correct); font-size: 28px; font-weight: bold; }
         
         #correct-word { color: white; font-weight: bold; font-size: 20px; letter-spacing: 2px; }
-        #word-meaning { color: #5dade2; font-size: 16px; font-weight: bold; margin-bottom: 25px; min-height: 24px; }
+        #word-meaning { margin-bottom: 25px; min-height: 24px; }
+        
+        /* 新增：詞性標籤的樣式 */
+        .pos-badge { 
+            background-color: #5dade2; 
+            color: #121213; 
+            padding: 2px 6px; 
+            border-radius: 4px; 
+            font-size: 13px; 
+            font-weight: bold; 
+            margin-right: 8px; 
+            vertical-align: middle; 
+        }
 
         button.play-again {
             background-color: var(--correct);
@@ -244,113 +256,87 @@
             width: 100%;
         }
 
-        button.play-again:hover { filter: brightness(1.1); }
-    </style>
-</head>
-<body>
-
-    <header>無限 WORDLE</header>
-
-    <div id="toast">訊息</div>
-
-    <div id="game-container">
-        <div id="board">
-            <!-- JavaScript 會動態產生行數 -->
-        </div>
-    </div>
-
-    <div id="keyboard">
-        <!-- JavaScript 會動態產生鍵盤 -->
-    </div>
-
-    <div id="modal">
-        <div class="modal-content">
-            <h2 id="modal-title">恭喜過關！</h2>
-            <p id="modal-desc">你總共猜了 <span class="highlight" id="guess-count">0</span> 次。</p>
-            <p style="font-size: 14px; color: #888; margin-bottom: 5px;">正確答案：<span id="correct-word"></span></p>
-            <p id="word-meaning">正在查詢中文解釋...</p> <!-- 新增中文翻譯區塊 -->
-            <button class="play-again" onclick="initGame()">再來一局</button>
-        </div>
-    </div>
-
-    <script>
-        // 內建備用單字庫 (當無網路或 API 壞掉時的備案)
-        const wordList = [
-            "APPLE", "TRAIN", "HOUSE", "WATER", "TIGER", "PLANT", "EARTH", "MONEY", "TABLE", "CHAIR",
-            "LIGHT", "NIGHT", "DREAM", "HEART", "MUSIC", "WORLD", "RIVER", "STONE", "FRUIT", "BREAD",
-            "GHOST", "SMILE", "MOUSE", "CLOCK", "PAPER", "PENNY", "SWEET", "STORY", "MAGIC", "POWER",
-            "SPACE", "STARS", "CLOUD", "STORM", "BEACH", "OCEAN", "GLASS", "WATCH", "BOARD", "FRAME"
-        ];
-
-        let targetWord = "";
-        let currentRow = 0;
-        let currentCol = 0;
-        let guesses = [];
-        let gameOver = false;
-        let isAnimating = false;
-        let isLoading = false;
-        let keyColors = {};
-
-        const keyboardLayout = [
-            ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
-            ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-            ['ENTER', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '⌫']
-        ];
-
-        const boardEl = document.getElementById('board');
-        const keyboardEl = document.getElementById('keyboard');
-        const gameContainerEl = document.getElementById('game-container');
-        const toastEl = document.getElementById('toast');
-        const modalEl = document.getElementById('modal');
-
-        // 初始化鍵盤 DOM
-        function initKeyboard() {
-            keyboardEl.innerHTML = '';
-            keyboardLayout.forEach(row => {
-                const rowEl = document.createElement('div');
-                rowEl.className = 'keyboard-row';
-                row.forEach(key => {
-                    const btn = document.createElement('button');
-                    btn.className = 'key';
-                    if (key === 'ENTER' || key === '⌫') btn.classList.add('large');
-                    if (key === '⌫') btn.classList.add('backspace'); // 加入刪除鍵專屬 class
-                    btn.textContent = key;
-                    btn.setAttribute('data-key', key);
-                    btn.onclick = () => handleKey(key);
-                    rowEl.appendChild(btn);
-                });
-                keyboardEl.appendChild(rowEl);
-            });
-        }
-
-        // 從 API 獲取隨機單字
-        async function fetchRandomWord() {
-            try {
-                const response = await fetch('https://random-word-api.herokuapp.com/word?length=5');
-                const data = await response.json();
-                return data[0].toUpperCase();
-            } catch (error) {
-                console.error("獲取單字失敗，使用備用單字", error);
-                return wordList[Math.floor(Math.random() * wordList.length)];
-            }
-        }
-
-        // 取得中文翻譯 (新增功能)
+        // 取得中文翻譯與詞性 (全新升級版)
         async function fetchWordMeaning(word) {
             const meaningEl = document.getElementById('word-meaning');
+            meaningEl.innerHTML = '<span style="color:#888; font-size:14px;">正在查詢字典與翻譯...</span>';
+            
             try {
-                // 呼叫免費的英翻中 API (MyMemory)
-                const response = await fetch(`https://api.mymemory.translated.net/get?q=${word}&langpair=en|zh-TW`);
-                const data = await response.json();
+                // 1. 先從字典 API 拿詞性與英文解釋
+                let partOfSpeech = "";
+                let enDef = "";
                 
-                if (data && data.responseData && data.responseData.translatedText) {
-                    meaningEl.textContent = `💡 意思：${data.responseData.translatedText}`;
-                } else {
-                    meaningEl.textContent = '(找不到中文解釋)';
+                try {
+                    const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+                    if (dictRes.ok) {
+                        const dictData = await dictRes.json();
+                        const meaning = dictData[0].meanings[0];
+                        partOfSpeech = meaning.partOfSpeech;
+                        enDef = meaning.definitions[0].definition;
+                    }
+                } catch(e) { console.warn("字典詳情獲取失敗", e); }
+
+                // 詞性翻譯對照表
+                const posMap = {
+                    "noun": "名詞", "verb": "動詞", "adjective": "形容詞", "adverb": "副詞",
+                    "pronoun": "代名詞", "preposition": "介詞", "conjunction": "連接詞", "interjection": "感嘆詞"
+                };
+                let posZh = partOfSpeech ? (posMap[partOfSpeech.toLowerCase()] || partOfSpeech) : "";
+
+                // 2. 翻譯單字本身
+                let zhWord = "";
+                try {
+                    const wordRes = await fetch(`https://api.mymemory.translated.net/get?q=${word}&langpair=en|zh-TW`);
+                    const wordData = await wordRes.json();
+                    if (wordData?.responseData?.translatedText) {
+                        let text = wordData.responseData.translatedText;
+                        // 避免 API 直接回傳英文原字
+                        if (text.toLowerCase() !== word.toLowerCase()) {
+                            zhWord = text;
+                        }
+                    }
+                } catch(e) { console.warn("單字翻譯失敗", e); }
+
+                // 3. 翻譯英文解釋句子
+                let zhDef = "";
+                if (enDef) {
+                    try {
+                        const defRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(enDef)}&langpair=en|zh-TW`);
+                        const defData = await defRes.json();
+                        if (defData?.responseData?.translatedText) {
+                            zhDef = defData.responseData.translatedText;
+                        }
+                    } catch(e) { console.warn("解釋翻譯失敗", e); }
                 }
+
+                // 4. 組合 HTML 呈現結果
+                let finalHTML = "";
+                
+                // 顯示詞性與單字簡譯
+                if (posZh || zhWord) {
+                    finalHTML += `<div style="margin-bottom: 10px; margin-top: 10px;">`;
+                    if (posZh) finalHTML += `<span class="pos-badge">${posZh}</span>`;
+                    if (zhWord) finalHTML += `<span style="font-weight: bold; font-size: 18px; color: #fff; vertical-align: middle;">${zhWord}</span>`;
+                    finalHTML += `</div>`;
+                }
+
+                // 顯示整段詳細解釋
+                if (zhDef) {
+                    finalHTML += `<div style="font-size: 15px; color: #ccc; text-align: left; background: rgba(255,255,255,0.08); padding: 12px; border-radius: 8px; line-height: 1.5;">💡 ${zhDef}</div>`;
+                } else if (enDef) {
+                    // 如果翻譯失敗，至少給英文解釋
+                    finalHTML += `<div style="font-size: 15px; color: #ccc; text-align: left; background: rgba(255,255,255,0.08); padding: 12px; border-radius: 8px; line-height: 1.5;">💡 ${enDef}</div>`;
+                }
+
+                if (!finalHTML) {
+                    meaningEl.innerHTML = '<span style="color:#888; font-size:14px;">(找不到這個單字的詳細解釋)</span>';
+                } else {
+                    meaningEl.innerHTML = finalHTML;
+                }
+
             } catch (error) {
-                console.error("翻譯 API 失敗", error);
-                meaningEl.textContent = '(無法連線取得解釋)';
+                console.error("整體翻譯流程失敗", error);
+                meaningEl.innerHTML = '<span style="color:#e74c3c; font-size:14px;">(無法連線取得解釋)</span>';
             }
         }
 
